@@ -1,0 +1,62 @@
+{
+  "name": "megatron",
+  "version": "1.0.0",
+  "description": "Next.js App Router (RSC) in Electron with ESBuild and Forge",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "npm run dev",
+    "dev:next": "next dev",
+    "build:electron:dev": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --target=node16 --external:electron --outdir=dist --define:process.env.NODE_ENV=\"\\\"development\\\"\"",
+    "dev": "npm run build:electron:dev && concurrently --kill-others \"npm run dev:next\" \"electronmon .\"",
+    "build:electron:prod": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --target=node16 --external:electron --outdir=dist --define:process.env.NODE_ENV=\"\\\"production\\\"\"",
+    "build:next": "next build && node scripts/copy-standalone-files.js",
+    "package": "npm run build:next && npm run build:electron:prod && electron-forge package",
+    "make": "npm run build:next && npm run build:electron:prod && electron-forge make"
+  },
+  "keywords": [
+    "nextjs",
+    "electron",
+    "rsc",
+    "esbuild",
+    "typescript"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cookie": "^1.0.2",
+    "iron-session": "^8.0.4",
+    "next": "^16.0.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "resolve": "^1.22.11",
+    "set-cookie-parser": "^2.7.2"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.10.2",
+    "@electron-forge/maker-deb": "^7.10.2",
+    "@electron-forge/maker-rpm": "^7.10.2",
+    "@electron-forge/maker-squirrel": "^7.10.2",
+    "@electron-forge/maker-zip": "^7.10.2",
+    "@tailwindcss/postcss": "^4",
+    "@types/electron": "^1.4.38",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.6",
+    "@types/react-dom": "^19",
+    "@types/resolve": "^1.20.6",
+    "@types/set-cookie-parser": "^2.4.10",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.3",
+    "electronmon": "^2.0.4",
+    "esbuild": "^0.27.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.3",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "config": {
+    "forge": "./forge.config.ts"
+  }
+}

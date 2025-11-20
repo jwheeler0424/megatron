@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": ".tscache/cache-electron",
+    "esModuleInterop": true,
+    "jsx": "react",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "module": "es2022",
+    "outDir": "build",
+    "rootDir": "electron",
+    "resolveJsonModule": true
+  },
+  "include": ["electron/**/*.ts", "electron/**/*.json"]
+}
