@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "main": "dist-electron/main.js",
+  "author": {
+    "name": "Jonathan Wheeler"
+  },
+  "description": "A Nextjs and Electron package.",
   "scripts": {
     "dev": "node scripts/dev.js",
     "next:dev": "next dev",

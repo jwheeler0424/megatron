@@ -3,8 +3,16 @@ import { MakerRpm } from '@electron-forge/maker-rpm';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import type { ForgeConfig } from '@electron-forge/shared-types';
+import { FusesPlugin } from '@electron-forge/plugin-fuses';
+import { VitePlugin } from '@electron-forge/plugin-vite';
 import { execSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
+import { FuseV1Options, FuseVersion } from '@electron/fuses';
+
+const DIST_ELECTRON = path.resolve(__dirname, 'dist-electron');
+const NEXT_STANDALONE = path.resolve(__dirname, '.next/standalone');
+const NEXT_TARGET = path.join(DIST_ELECTRON, 'next/standalone');
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -22,8 +30,15 @@ const config: ForgeConfig = {
   hooks: {
     prePackage: async () => {
       console.log('Building Next.js and Electron before packaging...');
-      execSync('npm run build:next', { stdio: 'inherit' });
-      execSync('npm run build:electron', { stdio: 'inherit' });
+      execSync('next build', { stdio: 'inherit' });
+      // console.log('Copying .next/standalone into dist-electron/next/standalone');
+      //     fs.mkdirSync(NEXT_TARGET, { recursive: true });
+      //     fs.cpSync(NEXT_STANDALONE, NEXT_TARGET, { recursive: true });
+      
+          console.log('Building Electron (Vite)');
+          execSync('vite build --config electron/vite.config.ts', { stdio: 'inherit' })
+      
+          console.log('✅ Build + package finished successfully');
       console.log('Builds complete.');
     },
   },
