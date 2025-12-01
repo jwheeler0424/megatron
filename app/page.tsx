@@ -1,7 +1,11 @@
 import Image from "next/image";
-import PingButton from './PingButton.client';
+import PingButton from "./PingButton.client";
+import Client from "./client";
 
-export default function Home() {
+import electron, { app, ipcMain } from "electron";
+
+export default async function Home() {
+  electron.shell?.beep();
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
@@ -35,9 +39,12 @@ export default function Home() {
             center.
           </p>
           {/* client interactive part */}
-      <div className="mt-4">
-        <PingButton />
-      </div>
+          <div className="mt-4">
+            <PingButton />
+            <Client
+              server={`Node Version: ${process.version}, Electron Version: ${process.versions.electron}, App Version: ${app?.getVersion()}`}
+            />
+          </div>
         </div>
         <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
           <a

@@ -3,7 +3,8 @@ declare global {
   interface Window {
     api?: {
       ping: () => Promise<string>;
-      createWindow?: (route: string) => Promise<{ id: number }>;
+      getAppInfo: () => Promise<AppInfo>; // New function signature
+      beep: () => Promise<void>; // New function signature
       // add others as you expose them
     };
   }

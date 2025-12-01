@@ -2,30 +2,37 @@
   "name": "megatron",
   "version": "0.1.0",
   "private": true,
-  "main": "dist-electron/main.js",
+  "main": "build/main.js",
   "author": {
     "name": "Jonathan Wheeler"
   },
   "description": "A Nextjs and Electron package.",
   "scripts": {
-    "dev": "node scripts/dev.js",
-    "next:dev": "next dev",
-    "electron:dev": "vite --config electron/vite.config.ts",
-    "build:next": "next build",
-    "build:electron": "vite build --config electron/vite.config.ts",
-    "package": "electron-forge make",
-    "lint": "eslint",
-    "start": "electron ."
+    "dev": "concurrently -k \"next dev\" \"npm run electron:wait\"",
+    "electron:wait": "wait-on tcp:3000 && npm run electron:watch",
+    "electron:build": "tsc -p electron/tsconfig.json",
+    "electron:watch": "concurrently -k \"npm run electron:compile\" \"npm run electron:start\"",
+    "electron:compile": "tsc -p electron/tsconfig.json --preserveWatchOutput -w",
+    "electron:start": "nodemon --watch build --exec electron .",
+    "build:next": "next build && tsx scripts/build-next.js",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build": "npm run build:next && npm run build:electron",
+    "package": "npm run build && electron-forge package",
+    "make": "npm run build && electron-forge make",
+    "start": "npm run build:electron && electron .",
+    "lint": "next lint"
   },
   "dependencies": {
+    "cookie": "^1.1.1",
     "cross-env": "^10.1.0",
     "electron-squirrel-startup": "^1.0.1",
     "electron-updater": "^6.6.2",
+    "get-port": "^7.1.0",
+    "iron-session": "^8.0.4",
     "next": "16.0.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "vite": "^7.2.4",
-    "vite-plugin-electron": "^0.29.0"
+    "set-cookie-parser": "^2.7.2"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.10.2",
@@ -37,18 +44,24 @@
     "@electron-forge/plugin-fuses": "^7.10.2",
     "@electron-forge/plugin-vite": "^7.10.2",
     "@electron/fuses": "^1.8.0",
+    "@remix-run/node": "^2.17.2",
     "@tailwindcss/postcss": "^4",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@types/node": "^24.10.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/resolve": "^1.20.6",
+    "@types/set-cookie-parser": "^2.4.10",
     "@vitejs/plugin-react": "^5.1.1",
-    "electron": "^39.2.3",
-    "esbuild": "^0.27.0",
+    "baseline-browser-mapping": "^2.8.32",
+    "concurrently": "^9.2.1",
+    "electron": "^39.2.4",
     "eslint": "^9",
     "eslint-config-next": "16.0.3",
-    "fs-extra": "^11.3.2",
+    "nodemon": "^3.1.11",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "wait-on": "^9.0.3"
   }
 }

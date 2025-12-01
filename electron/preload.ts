@@ -1,28 +1,29 @@
-// Copyright (C) 2025 Jonathan Wheeler
-// 
-// This file is part of megatron.
-// 
-// megatron is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-// 
-// megatron is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-// 
-// You should have received a copy of the GNU General Public License
-// along with megatron.  If not, see <https://www.gnu.org/licenses/>.
+import { contextBridge, ipcRenderer } from "electron";
 
-import { contextBridge, ipcRenderer } from 'electron';
+// Define the structure for the application info object
+export type AppInfo = {
+  nodeVersion: string;
+  electronVersion: string;
+  appVersion: string;
+};
 
+// Define the complete API structure for type safety
 export type Api = {
   ping: () => Promise<string>;
+  getAppInfo: () => Promise<AppInfo>; // New function signature
+  beep: () => Promise<void>; // New function signature
 };
 
 const api: Api = {
-  ping: () => ipcRenderer.invoke('ping')
+  // Existing function
+  ping: () => ipcRenderer.invoke("ping"),
+
+  // New function to fetch system info
+  getAppInfo: () => ipcRenderer.invoke("get-app-info"),
+
+  // New function to trigger a system beep
+  beep: () => ipcRenderer.invoke("beep-sound"),
 };
 
-contextBridge.exposeInMainWorld('api', api);
+// Expose the API globally to the renderer process
+contextBridge.exposeInMainWorld("api", api);
