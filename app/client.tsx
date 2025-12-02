@@ -41,7 +41,7 @@ export default function Client({ server }: { server: string }) {
     <div className="prose p-4 prose-sm max-w-none">
       <h3 className="text-xl">Server Page</h3>
       <p>
-        <code>{server}</code>
+        <code className="text-wrap wrap-break-word">{server}</code>
       </p>
 
       <h3>Server Action</h3>
