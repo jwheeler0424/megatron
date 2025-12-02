@@ -1,6 +1,13 @@
 {
   "compilerOptions": {
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "es2024",
+      "ESNext.Array",
+      "ESNext.Collection",
+      "ESNext.Iterator",
+      "dom",
+      "WebWorker"
+    ],
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "target": "es2019",
@@ -12,6 +19,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "jsx": "react"
-  }
+    "preserveConstEnums": true,
+    "sourceMap": true,
+    "importHelpers": true,
+    "noEmitHelpers": true,
+    "jsx": "react",
+    "typeRoots": ["./node_modules/@types"]
+  },
+  "include": ["**/*"]
 }

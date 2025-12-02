@@ -27,8 +27,6 @@ process.env["ELECTRON_ENABLE_LOGGING"] = "true";
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
 
-app.commandLine.appendSwitch("enable-logging");
-
 const mode = app.isPackaged
   ? "packaged"
   : process.env.NODE_ENV === "production"
@@ -63,9 +61,10 @@ protocol.registerSchemesAsPrivileged([
 let stopIntercept: (() => void) | null = null;
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
-// if (require("electron-squirrel-startup")) {
-//   app.quit();
-// }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+if (require("electron-squirrel-startup")) {
+  app.quit();
+}
 
 /**
  * Gets an available port by trying to listen on port 0.
