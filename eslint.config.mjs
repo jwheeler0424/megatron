@@ -21,6 +21,7 @@ const eslintConfig = defineConfig([
           ignoreRestSiblings: true,
         },
       ],
+      "@typescript-eslint/no-explicit-any": "off",
     },
   },
   // Override default ignores of eslint-config-next.

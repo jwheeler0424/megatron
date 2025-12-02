@@ -19,7 +19,7 @@
     "build": "npm run build:next && npm run build:electron",
     "package": "npm run build && electron-forge package",
     "make": "npm run build && electron-forge make",
-    "start": "npm run build:electron && electron .",
+    "start": "npm run build:electron && cross-env NODE_ENV=production electron .",
     "lint": "next lint"
   },
   "dependencies": {

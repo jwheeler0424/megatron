@@ -19,6 +19,6 @@ const nextConfig: NextConfig = {
   },
 };
 
-if (process.env.NODE_ENV === "development") delete nextConfig.output; // for HMR
+if (process.env.NODE_ENV !== "production") delete nextConfig.output; // for HMR
 
 export default nextConfig;

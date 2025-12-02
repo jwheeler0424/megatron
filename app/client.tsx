@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Image from "next/image";
+import { useEffect, useState } from "react";
 import { getFromServer } from "./action";
 
 export default function Client({ server }: { server: string }) {
@@ -51,7 +51,7 @@ export default function Client({ server }: { server: string }) {
       <p>{cookie}</p>
 
       <h3 className="text-xl">Route Handler API response</h3>
-      <pre className="text-xs">
+      <pre className="text-xs max-w-lg">
         <code>{JSON.stringify(json, null, 2)}</code>
       </pre>
 

@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "lib": ["dom", "dom.iterable", "esnext"],
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
     "target": "es2019",
     "outDir": "../build",
     "rootDir": ".",
@@ -11,8 +11,7 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "jsx": "react"
-  },
-  "include": ["./**/*"],
-  "exclude": ["./lib"]
+  }
 }

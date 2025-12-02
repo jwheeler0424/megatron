@@ -1,6 +1,13 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 import type { Protocol, Session } from "electron";
-import next from "next";
-import { NextBundlerOptions, NextServerOptions } from "next/dist/server/next";
+// import next from "next";
+import { NextConfig } from "next";
+import createServer, {
+  NextBundlerOptions,
+  NextServer,
+  NextServerOptions,
+  RequestHandler,
+} from "next/dist/server/next";
 import assert from "node:assert";
 import fs from "node:fs";
 import {
@@ -9,12 +16,18 @@ import {
   ServerResponse,
 } from "node:http";
 import { Socket } from "node:net";
+import path from "node:path";
 import { parse } from "node:url";
-import cookieParser from "set-cookie-parser";
+// import resolve from "resolve";
+import { serialize as serializeCookie } from "cookie";
+import { parse as parseCookie, splitCookiesString } from "set-cookie-parser";
 // import path from "node:path";
 
 // type NextServer = ReturnType<typeof createServerNext>;
 type ServerOptions = NextServerOptions & NextBundlerOptions;
+type ServerBuild = (
+  options: NextServerOptions & NextBundlerOptions
+) => NextServer;
 
 /**
  * Converts an OutgoingHttpHeaders object to a HeadersInit value.
@@ -42,7 +55,7 @@ export function outgoingHttpHeadersToHeadersInit(
  * https://github.com/vercel/next.js/pull/68167/files#diff-d0d8b7158bcb066cdbbeb548a29909fe8dc4e98f682a6d88654b1684e523edac
  * https://github.com/vercel/next.js/blob/canary/examples/custom-server/server.ts
  */
-export function createHandler({
+export async function createHandler({
   protocol,
   debug = false,
   dev = true,
@@ -56,16 +69,14 @@ export function createHandler({
   protocol: Protocol;
   debug?: boolean;
   mode?: "production" | "development" | "packaged";
-}): {
+}): Promise<{
   url: string;
   createInterceptor: ({ session }: { session: Session }) => Promise<() => void>;
-} {
+}> {
   assert(dir, "dir is required");
   assert(protocol, "protocol is required");
   assert(hostname, "hostname is required");
   assert(port, "port is required");
-
-  dir = dev ? process.cwd() : dir;
 
   if (debug) {
     console.log("Next.js handler", {
@@ -79,55 +90,45 @@ export function createHandler({
 
   const localhostUrl = `http://${hostname}:${port}`;
 
-  const serverOptions: Omit<ServerOptions, "conf"> = {
+  const serverOptions: Omit<ServerOptions, "conf"> & { isDev: boolean } = {
     ...nextOptions,
     dir,
     dev,
     hostname,
     port,
+    isDev: dev,
   };
 
-  const nextApp = next(serverOptions);
-  const handler = nextApp.getRequestHandler();
+  let preparePromise: Promise<void> | null = null;
+  let nextApp: NextServer | null = null;
+  let handler: RequestHandler | null = null;
+
   if (dev) {
-    // nextApp.prepare().then(() => {
-    //   createServer((req, res) => {
-    //     const parsedUrl = parse(req.url!, true);
-    //     handler(req, res, parsedUrl);
-    //   }).listen(port);
-    //   console.log(
-    //     `> Server listening at http://${hostname}:${port} as ${mode}`
-    //   );
-    // });
-    // Early exit before rest of prod stuff
-    // return {
-    //   url: localhostUrl,
-    //   createInterceptor: async ({ session }: { session: Session }) => {
-    //     assert(session, "Session is required");
-    //     if (debug)
-    //       console.log(
-    //         `Server Intercept Enabled, ${localhostUrl} is served by Next.js embedded server`
-    //       );
-    //     return () => {};
-    //   },
-    // };
+    // const createServer = (await import("next"))
+    //   .default as unknown as ServerBuild;
+    nextApp = createServer(serverOptions) as NextServer;
+    handler = nextApp?.getRequestHandler();
+  } else {
+    const next = require("next");
+
+    // @see https://github.com/vercel/next.js/issues/64031#issuecomment-2078708340
+    const config = require(
+      path.join(dir, ".next", "required-server-files.json")
+    ).config as NextConfig;
+    process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify({
+      ...config,
+      ...nextOptions?.conf,
+    });
+
+    nextApp = next(serverOptions) as NextServer;
+    handler = nextApp?.getRequestHandler();
   }
 
-  // const next = require(resolve.sync("next", { basedir: dir }));
+  if (!nextApp) {
+    throw new Error("Failed to create Next.js server");
+  }
 
-  // @see https://github.com/vercel/next.js/issues/64031#issuecomment-2078708340
-  // const config = require(path.join(dir, ".next", "required-server-files.json"))
-  //   .config as NextConfig;
-  // process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify({
-  //   ...config,
-  //   ...nextOptions?.conf,
-  // });
-
-  // const app = next(serverOptions) as NextServer;
-
-  // const handler = app.getRequestHandler();
-
-  const preparePromise = nextApp.prepare().catch((err: Error) => {
+  preparePromise = nextApp?.prepare().catch((err: Error) => {
     console.error("Cannot prepare Next.js server", err.stack);
     throw err;
   });
@@ -156,6 +157,7 @@ export function createHandler({
           request.url.startsWith(localhostUrl),
           "External HTTP not supported, use HTTPS"
         );
+        assert(handler, "Next.js handler is not initialized");
 
         const req = await createRequest({ socket, request, session });
         const res = new ReadableServerResponse(req);
@@ -166,26 +168,48 @@ export function createHandler({
         const response = await res.getResponse();
 
         try {
-          const cookies = cookieParser(response.headers.getSetCookie());
-
-          await Promise.all(
-            cookies.map((cookie) =>
-              session.cookies.set({
-                url: req.url ?? "/",
-                name: cookie.name,
-                value: cookie.value,
-                path: cookie.path,
-                domain: cookie.domain,
-                secure: cookie.secure,
-                httpOnly: cookie.httpOnly,
-                expirationDate: cookie.expires
-                  ? cookie.expires.getTime() / 1000
-                  : cookie.maxAge
-                    ? Date.now() / 1000 + cookie.maxAge
-                    : undefined,
-              })
-            )
+          const cookies = parseCookie(
+            response.headers.getSetCookie().reduce((r, c) => {
+              // @see https://github.com/nfriedly/set-cookie-parser?tab=readme-ov-file#usage-in-react-native-and-with-some-other-fetch-implementations
+              return [...r, ...splitCookiesString(c)];
+            }, [] as string[])
           );
+
+          for (const cookie of cookies) {
+            const {
+              name,
+              value,
+              path,
+              domain,
+              secure,
+              httpOnly,
+              expires,
+              maxAge,
+            } = cookie;
+
+            const expirationDate = expires
+              ? expires.getTime()
+              : maxAge
+                ? Date.now() + maxAge * 1000
+                : undefined;
+
+            if (expirationDate && expirationDate < Date.now()) {
+              await session.cookies.remove(request.url, cookie.name);
+              continue;
+            }
+
+            await session.cookies.set({
+              url: request.url,
+              expirationDate,
+              name,
+              value,
+              path,
+              domain,
+              secure,
+              httpOnly,
+              maxAge,
+            } as any);
+          }
         } catch (e) {
           throw new Error("Failed to set cookies", { cause: e });
         }
@@ -227,48 +251,31 @@ export async function createRequest({
   req.url = url.pathname + (url.search || "");
   req.method = request.method;
 
-  // request.headers.forEach((value, key) => {
-  //   req.headers[key] = value;
-  // });
+  request.headers.forEach((value, key) => {
+    req.headers[key] = value;
+  });
 
   try {
-    // @see https://github.com/electron/electron/issues/39525#issue-1852825052
-    // const cookies = await session.cookies.get({
-    //   url: request.url,
-    //   domain: url.hostname,
-    //   path: url.pathname,
-    //   // `secure: true` Cookies should not be sent via http
-    //   secure: url.protocol === 'http:' ? false : undefined,
-    //   // theoretically not possible to implement sameSite because we don't know the url
-    //   // of the website that is requesting the resource
-    // });
-
-    // if (cookies.length) {
-    //   const cookiesHeader = [];
-
-    //   for (const cookie of cookies) {
-    //     const { name, value, ...options } = cookie;
-    //     cookiesHeader.push(serializeCookie(name, value)); // ...(options as any)?
-    //   }
-
-    //   req.headers.cookie = cookiesHeader.join("; ");
-    // }
     const cookies = await session.cookies.get({
-      url: req.url,
-      domain: url.hostname,
-      path: url.pathname,
+      url: request.url,
+      // domain: url.hostname,
+      // path: url.pathname,
       // `secure: true` Cookies should not be sent via http
-      secure: url.protocol === "http:" ? false : undefined,
+      // secure: url.protocol === 'http:' ? false : undefined,
       // theoretically not possible to implement sameSite because we don't know the url
       // of the website that is requesting the resource
     });
 
-    request.headers.set(
-      "Cookie",
-      cookies
-        .map((cookie) => `${cookie.name}=${encodeURI(cookie.value)}`)
-        .join("; ")
-    );
+    if (cookies.length) {
+      const cookiesHeader = [];
+
+      for (const cookie of cookies) {
+        const { name, value, ...options } = cookie;
+        cookiesHeader.push(serializeCookie(name, value)); // ...(options as any)?
+      }
+
+      req.headers.cookie = cookiesHeader.join("; ");
+    }
   } catch (e: unknown) {
     throw new Error("Failed to parse cookies", { cause: e });
   }

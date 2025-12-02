@@ -14,10 +14,8 @@
 import { ChildProcess } from "child_process";
 import { app, BrowserWindow, ipcMain, protocol, shell } from "electron";
 import fs from "fs";
-import http, { IncomingMessage } from "http";
 import net, { AddressInfo } from "net";
 import path from "path";
-import { createHandler } from "./lib/next-electron";
 
 let nextProcess: ChildProcess | undefined;
 let serverPort: number | undefined;
@@ -31,16 +29,23 @@ process.on("SIGINT", () => process.exit(0));
 
 app.commandLine.appendSwitch("enable-logging");
 
-const isProduction = app.isPackaged || process.env.NODE_ENV === "production";
-const isDev = !isProduction;
 const mode = app.isPackaged
   ? "packaged"
   : process.env.NODE_ENV === "production"
     ? "production"
     : "development";
+const isDev = mode === "development" && !app.isPackaged;
 
 const appPath = app.getAppPath();
 console.log({ mode, appPath });
+if (app.isPackaged)
+  fs.readdir(appPath, (err, files) => {
+    if (err) {
+      console.error("Error reading directory:", err);
+      return;
+    }
+    console.log("Directory contents:", files); // 'files' is an array of filenames and directory names
+  });
 
 let watcher: fs.FSWatcher | null = null;
 
@@ -60,85 +65,6 @@ let stopIntercept: (() => void) | null = null;
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // if (require("electron-squirrel-startup")) {
 //   app.quit();
-// }
-
-/**
- * Utility function to handle exponential backoff for checking the server status.
- * This is still useful as the internal Next.js server takes a moment to start listening.
- */
-function checkServerStatus(url: string, maxRetries = 10, delay = 1000) {
-  return new Promise((resolve, reject) => {
-    const attempt = (retryCount: number) => {
-      // Note: Since 'fetch' is not available in the main process globally,
-      // we use Node's built-in 'http' module for this check.
-      // const http = require("http");
-      http
-        .get(url, (response: IncomingMessage) => {
-          if (response.statusCode === 200) {
-            resolve(true);
-          } else {
-            reject(
-              new Error(
-                `Server responded with status code ${response.statusCode}`
-              )
-            );
-          }
-        })
-        .on("error", (error: Error) => {
-          if (retryCount > 0) {
-            console.log(
-              `Server not ready, retrying in ${delay}ms... (${retryCount} attempts left)`
-            );
-            setTimeout(() => attempt(retryCount - 1), delay);
-          } else {
-            reject(
-              new Error(
-                "Next.js server failed to start or respond within the timeout."
-              )
-            );
-          }
-        });
-    };
-    attempt(maxRetries);
-  });
-}
-
-/**
- * Starts the Next.js standalone server by requiring it directly into the Electron process.
- * This avoids the need to 'spawn' the 'node' executable, resolving packaging errors.
- */
-// async function startNextServer() {
-//   // 1. Determine the correct path to the server.js file
-//   const scriptPath = app.isPackaged
-//     ? path.join(__dirname, "..", "standalone", "server.js") // FIXED: Use relative path for ASAR compatibility
-//     : path.join(".next", "standalone", "server.js");
-
-//   console.log("Starting Next.js server from:", scriptPath);
-
-//   // 2. Find an available port
-//   serverPort = await getAvailablePort();
-//   const url = `http://localhost:${serverPort}`;
-
-//   console.log(`Starting Next.js server internally on: ${url}`);
-//   console.log(`Loading script from: ${scriptPath}`);
-
-//   // 3. Set the PORT environment variable for the script to use
-//   process.env.PORT = serverPort?.toString() ?? "0";
-
-//   try {
-//     // 4. Require the Next.js server script directly
-//     // This executes the script inside the current Electron main process.
-//     require(scriptPath);
-//   } catch (e) {
-//     console.error("Failed to run Next.js server script:", e);
-//     app.quit();
-//     return;
-//   }
-
-//   // 5. Wait for the server to be ready before creating the window
-//   await checkServerStatus(url);
-
-//   return url;
 // }
 
 /**
@@ -171,6 +97,7 @@ async function createWindow() {
     },
   });
 
+  const { createHandler } = await import("./next-electron.js");
   if (isDev) {
     watcher = fs.watch(path.join(appPath, "app"), { recursive: true });
     watcher.on("change", (eventType, filename) => {
@@ -182,13 +109,14 @@ async function createWindow() {
       // 2. Find an available port
       serverPort = await getAvailablePort();
 
-      const { createInterceptor, url } = createHandler({
+      const { createInterceptor, url } = await createHandler({
         dev: isDev,
         dir: path.resolve(appPath),
         protocol,
         debug: false,
         port: serverPort,
         turbopack: true, // optional
+        mode,
       });
 
       stopIntercept = await createInterceptor({
@@ -212,22 +140,40 @@ async function createWindow() {
       return;
     }
   } else {
-    // Start the Next.js server and navigate the window once it's ready
-    // startNextServer()
-    //   .then((url) => {
-    //     mainWindow?.loadURL(url as string);
-    //     // Open DevTools automatically if not packaged
-    //     if (!app.isPackaged) {
-    //       mainWindow?.webContents.openDevTools();
-    //     }
-    //   })
-    //   .catch((err) => {
-    //     console.error(
-    //       "FATAL ERROR: Could not start application server.",
-    //       err.message
-    //     );
-    //     app.quit();
-    //   });
+    try {
+      // 2. Find an available port
+      serverPort = await getAvailablePort();
+
+      const { createInterceptor, url } = await createHandler({
+        dev: isDev,
+        dir: path.resolve(appPath),
+        protocol,
+        debug: true,
+        port: serverPort,
+        turbopack: true, // optional
+        mode,
+      });
+
+      stopIntercept = await createInterceptor({
+        session: mainWindow.webContents.session,
+      });
+      console.log(`Starting Next.js server internally on: ${url}`);
+
+      // 3. Set the PORT environment variable for the script to use
+      process.env.PORT = serverPort?.toString() ?? "0";
+
+      // 4. Wait for the server to be ready before creating the window
+      await app.whenReady();
+      // await checkServerStatus(url);
+
+      await mainWindow.loadURL(url + "/");
+
+      console.log("[APP] Loaded", url);
+    } catch (e) {
+      console.error("Failed to run Next.js Development Server:", e);
+      app.quit();
+      return;
+    }
   }
 
   mainWindow.on("closed", () => {
