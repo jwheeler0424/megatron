@@ -6,6 +6,9 @@ import { ElectronVersions } from "@electron/fiddle-core";
 const file = path.join(__dirname, "..", ".next", "static", "releases.json");
 
 export async function populateReleases() {
+  if (!fs.existsSync(path.dirname(file))) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+  }
   const elves = await ElectronVersions.create({ ignoreCache: true });
   const releases = elves.versions.map(({ version }) =>
     elves.getReleaseInfo(version)

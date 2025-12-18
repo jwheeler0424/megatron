@@ -1,47 +1,39 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-import type { Protocol, Session } from "electron";
+import { type Protocol, type Session } from 'electron';
 // import next from "next";
-import { NextConfig } from "next";
-import createServer, {
+
+import { NextConfig } from 'next';
+import createNextServer, {
   NextBundlerOptions,
   NextServer,
   NextServerOptions,
   RequestHandler,
-} from "next/dist/server/next";
-import assert from "node:assert";
-import fs from "node:fs";
-import {
-  IncomingMessage,
-  OutgoingHttpHeaders,
-  ServerResponse,
-} from "node:http";
-import { Socket } from "node:net";
-import path from "node:path";
-import { parse } from "node:url";
+} from 'next/dist/server/next';
+import assert from 'node:assert';
+import fs from 'node:fs';
+import { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
+import path from 'node:path';
+import { parse } from 'node:url';
 // import resolve from "resolve";
-import { serialize as serializeCookie } from "cookie";
-import { parse as parseCookie, splitCookiesString } from "set-cookie-parser";
+import { serialize as serializeCookie } from 'cookie';
+import { parse as parseCookie, splitCookiesString } from 'set-cookie-parser';
 // import path from "node:path";
 
 // type NextServer = ReturnType<typeof createServerNext>;
 type ServerOptions = NextServerOptions & NextBundlerOptions;
-type ServerBuild = (
-  options: NextServerOptions & NextBundlerOptions
-) => NextServer;
 
 /**
  * Converts an OutgoingHttpHeaders object to a HeadersInit value.
  * Handles undefined, null, array, and number header values per the fetch spec.
  */
-export function outgoingHttpHeadersToHeadersInit(
-  headers: OutgoingHttpHeaders
-): HeadersInit {
+export function outgoingHttpHeadersToHeadersInit(headers: OutgoingHttpHeaders): HeadersInit {
   const result: Record<string, string> = {};
   for (const key in headers) {
     const value = headers[key];
-    if (typeof value === "undefined" || value === null) continue;
+    if (typeof value === 'undefined' || value === null) continue;
     if (Array.isArray(value)) {
-      result[key] = value.join(", ");
+      result[key] = value.join(', ');
     } else {
       // number or string
       result[key] = value.toString();
@@ -59,27 +51,29 @@ export async function createHandler({
   protocol,
   debug = false,
   dev = true,
-  hostname = "localhost",
+  hostname = 'localhost',
   port = 3000,
   dir,
-  mode = "development",
+  mode = 'development',
+  https = true,
   ...nextOptions
-}: Omit<ServerOptions, "conf"> & {
-  conf?: ServerOptions["conf"];
+}: Omit<ServerOptions, 'conf'> & {
+  conf?: ServerOptions['conf'];
   protocol: Protocol;
   debug?: boolean;
-  mode?: "production" | "development" | "packaged";
+  mode?: 'production' | 'development' | 'packaged';
+  https?: boolean;
 }): Promise<{
   url: string;
   createInterceptor: ({ session }: { session: Session }) => Promise<() => void>;
 }> {
-  assert(dir, "dir is required");
-  assert(protocol, "protocol is required");
-  assert(hostname, "hostname is required");
-  assert(port, "port is required");
+  assert(dir, 'dir is required');
+  assert(protocol, 'protocol is required');
+  assert(hostname, 'hostname is required');
+  assert(port, 'port is required');
 
   if (debug) {
-    console.log("Next.js handler", {
+    console.log('Next.js handler', {
       dev: dev,
       dir: dir,
       hostname: hostname,
@@ -88,9 +82,9 @@ export async function createHandler({
     });
   }
 
-  const localhostUrl = `http://${hostname}:${port}`;
+  const localhostUrl = https ? `https://${hostname}:${port}` : `http://${hostname}:${port}`;
 
-  const serverOptions: Omit<ServerOptions, "conf"> & { isDev: boolean } = {
+  const serverOptions: Omit<ServerOptions, 'conf'> & { isDev: boolean } = {
     ...nextOptions,
     dir,
     dev,
@@ -104,64 +98,69 @@ export async function createHandler({
   let handler: RequestHandler | null = null;
 
   if (dev) {
-    // const createServer = (await import("next"))
-    //   .default as unknown as ServerBuild;
-    nextApp = createServer(serverOptions) as NextServer;
+    nextApp = createNextServer({
+      ...serverOptions,
+      conf: {
+        devIndicators: false,
+        experimental: {
+          browserDebugInfoInTerminal: true,
+        },
+        compiler: {
+          removeConsole: true,
+        },
+      },
+      experimentalHttpsServer: https,
+    }) as NextServer;
     handler = nextApp?.getRequestHandler();
   } else {
-    const next = require("next");
+    const next = require('next');
 
     // @see https://github.com/vercel/next.js/issues/64031#issuecomment-2078708340
-    const config = require(
-      path.join(dir, ".next", "required-server-files.json")
-    ).config as NextConfig;
+    const config = require(path.join(dir, '.next', 'required-server-files.json'))
+      .config as NextConfig;
     process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify({
       ...config,
+      devIndicators: false,
       ...nextOptions?.conf,
     });
 
-    nextApp = next(serverOptions) as NextServer;
+    nextApp = next({ ...serverOptions, experimentalHttpsServer: https }) as NextServer;
     handler = nextApp?.getRequestHandler();
   }
 
   if (!nextApp) {
-    throw new Error("Failed to create Next.js server");
+    throw new Error('Failed to create Next.js server');
   }
 
   preparePromise = nextApp?.prepare().catch((err: Error) => {
-    console.error("Cannot prepare Next.js server", err.stack);
+    console.error('Cannot prepare Next.js server', err.stack);
     throw err;
   });
 
   async function createInterceptor({ session }: { session: Session }) {
-    assert(session, "Session is required");
-    assert(fs.existsSync(dir ?? "unknown"), "dir does not exist");
+    assert(session, 'Session is required');
+    assert(fs.existsSync(dir ?? 'unknown'), 'dir does not exist');
 
     if (debug)
-      console.log(
-        `Server Intercept Enabled, ${localhostUrl} will be intercepted by ${dir}`
-      );
+      console.log(`Server Intercept Enabled, ${localhostUrl} will be intercepted by ${dir}`);
 
     const socket = new Socket();
 
     const closeSocket = () => socket.end();
 
-    process.on("SIGTERM", closeSocket);
-    process.on("SIGINT", closeSocket);
+    process.on('SIGTERM', closeSocket);
+    process.on('SIGINT', closeSocket);
 
     await preparePromise;
 
-    protocol.handle("http", async (request) => {
+    protocol.handle('http', async (request) => {
       try {
-        assert(
-          request.url.startsWith(localhostUrl),
-          "External HTTP not supported, use HTTPS"
-        );
-        assert(handler, "Next.js handler is not initialized");
+        assert(request.url.startsWith(localhostUrl), 'HTTP not supported, use HTTPS');
+        assert(handler, 'Next.js handler is not initialized');
 
         const req = await createRequest({ socket, request, session });
         const res = new ReadableServerResponse(req);
-        const url = parse(req.url ?? "/", true);
+        const url = parse(req.url ?? '/', true);
 
         handler(req, res, url); // Next.js request handler
 
@@ -176,16 +175,7 @@ export async function createHandler({
           );
 
           for (const cookie of cookies) {
-            const {
-              name,
-              value,
-              path,
-              domain,
-              secure,
-              httpOnly,
-              expires,
-              maxAge,
-            } = cookie;
+            const { name, value, path, domain, secure, httpOnly, expires, maxAge } = cookie;
 
             const expirationDate = expires
               ? expires.getTime()
@@ -211,22 +201,83 @@ export async function createHandler({
             } as any);
           }
         } catch (e) {
-          throw new Error("Failed to set cookies", { cause: e });
+          throw new Error('Failed to set cookies', { cause: e });
         }
 
-        if (debug) console.log("[NEXT] Handler", request.url, response.status);
+        if (debug) console.log('[NEXT] Handler', request.url, response.status);
         return response;
       } catch (e: unknown) {
         const err = e as Error;
-        if (debug) console.log("[NEXT] Error", err);
+        if (debug) console.log('[NEXT] Error', err);
+        return new Response(err.message, { status: 500 });
+      }
+    });
+
+    protocol.handle('https', async (request) => {
+      try {
+        assert(request.url.startsWith(localhostUrl), 'HTTPS not supported');
+        assert(handler, 'Next.js handler is not initialized');
+
+        const req = await createRequest({ socket, request, session });
+        const res = new ReadableServerResponse(req);
+        const url = parse(req.url ?? '/', true);
+
+        handler(req, res, url); // Next.js request handler
+
+        const response = await res.getResponse();
+
+        try {
+          const cookies = parseCookie(
+            response.headers.getSetCookie().reduce((r, c) => {
+              // @see https://github.com/nfriedly/set-cookie-parser?tab=readme-ov-file#usage-in-react-native-and-with-some-other-fetch-implementations
+              return [...r, ...splitCookiesString(c)];
+            }, [] as string[])
+          );
+
+          for (const cookie of cookies) {
+            const { name, value, path, domain, secure, httpOnly, expires, maxAge } = cookie;
+
+            const expirationDate = expires
+              ? expires.getTime()
+              : maxAge
+                ? Date.now() + maxAge * 1000
+                : undefined;
+
+            if (expirationDate && expirationDate < Date.now()) {
+              await session.cookies.remove(request.url, cookie.name);
+              continue;
+            }
+
+            await session.cookies.set({
+              url: request.url,
+              expirationDate,
+              name,
+              value,
+              path,
+              domain,
+              secure,
+              httpOnly,
+              maxAge,
+            } as any);
+          }
+        } catch (e) {
+          throw new Error('Failed to set cookies', { cause: e });
+        }
+
+        if (debug) console.log('[NEXT] Handler', request.url, response.status);
+        return response;
+      } catch (e: unknown) {
+        const err = e as Error;
+        if (debug) console.log('[NEXT] Error', err);
         return new Response(err.message, { status: 500 });
       }
     });
 
     return function stopIntercept() {
-      protocol.unhandle("http");
-      process.off("SIGTERM", closeSocket);
-      process.off("SIGINT", closeSocket);
+      protocol.unhandle('http');
+      protocol.unhandle('https');
+      process.off('SIGTERM', closeSocket);
+      process.off('SIGINT', closeSocket);
       closeSocket();
     };
   }
@@ -248,7 +299,7 @@ export async function createRequest({
   const url = new URL(request.url);
 
   // Normal Next.js URL does not contain schema and host/port, otherwise endless loops due to butchering of schema by normalizeRepeatedSlashes in resolve-routes
-  req.url = url.pathname + (url.search || "");
+  req.url = url.pathname + (url.search || '');
   req.method = request.method;
 
   request.headers.forEach((value, key) => {
@@ -274,10 +325,10 @@ export async function createRequest({
         cookiesHeader.push(serializeCookie(name, value)); // ...(options as any)?
       }
 
-      req.headers.cookie = cookiesHeader.join("; ");
+      req.headers.cookie = cookiesHeader.join('; ');
     }
   } catch (e: unknown) {
-    throw new Error("Failed to parse cookies", { cause: e });
+    throw new Error('Failed to parse cookies', { cause: e });
   }
 
   if (request.body) {
@@ -302,27 +353,25 @@ export class ReadableServerResponse extends ServerResponse {
           let onData;
 
           this.on(
-            "data",
-            (onData = (
-              chunk: ArrayBuffer | Buffer | BufferEncoding | string
-            ) => {
+            'data',
+            (onData = (chunk: ArrayBuffer | Buffer | BufferEncoding | string) => {
               controller.enqueue(chunk);
             })
           );
 
-          this.once("end", (chunk) => {
+          this.once('end', (chunk) => {
             controller.enqueue(chunk);
             controller.close();
-            this.off("data", onData);
+            this.off('data', onData);
           });
         },
         pull: (_controller) => {
-          this.emit("drain");
+          this.emit('drain');
         },
         cancel: () => {},
       });
 
-      this.once("writeHead", (statusCode) => {
+      this.once('writeHead', (statusCode) => {
         const headers = outgoingHttpHeadersToHeadersInit(this.getHeaders());
         resolve(
           new Response(readableStream, {
@@ -337,19 +386,19 @@ export class ReadableServerResponse extends ServerResponse {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   write(chunk: ArrayBuffer | Buffer | string, ...args: any[]): boolean {
-    this.emit("data", chunk);
+    this.emit('data', chunk);
     return super.write(chunk, ...args);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   end(chunk: (() => void) | undefined, ...args: any[]): this {
-    this.emit("end", chunk);
+    this.emit('end', chunk);
     return super.end(chunk, ...args);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   writeHead(statusCode: number, ...args: any[]): this {
-    this.emit("writeHead", statusCode);
+    this.emit('writeHead', statusCode);
     return super.writeHead(statusCode, ...args);
   }
 

@@ -1,5 +1,0 @@
-{
-    "licenser.author": "Jonathan Wheeler",
-    "licenser.license": "GPLv3",
-    "licenser.excludeFileExtensions": ["json", "md", ".gitignore", ".css"]
-}

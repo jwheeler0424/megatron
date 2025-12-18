@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "lib": [
-      "es2024",
+      "esnext",
       "ESNext.Array",
       "ESNext.Collection",
       "ESNext.Iterator",

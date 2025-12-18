@@ -4,7 +4,14 @@ const nextConfig: NextConfig = {
   output: "standalone",
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   outputFileTracingIncludes: {
-    "*": ["public/**/*", ".next/static/**/*"],
+    "*": [
+      "public/**/*", 
+      ".next/static/**/*", 
+      "node_modules/.bin/drizzle-kit", 
+      "node_modules/drizzle-orm/**/*", 
+      "node_modules/drizzle-kit/**/*", 
+      "node_modules/@electric-sql/pglite/dist/**/*"
+    ],
   },
   serverExternalPackages: ["electron"],
   images: {
