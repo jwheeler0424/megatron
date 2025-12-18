@@ -1,31 +1,25 @@
-/**
- * PLAN:
- * Run two child processes for dev with Electron and Next.js
- * In production, use Next.js's standalone mode and point Electron to that build
- * using dynamic import and serve via a custom server while loading the standlone
- * files to the electron output folder. Also need to include the static files and
- * other scripts which have been created in this folder.
- *
- * STEP 1: Get the dev mode working with two processes
- *
- * STEP 2: Get the production mode working with standalone build
- *
- */
 import { ChildProcess, execSync } from 'child_process';
+import chokidar from 'chokidar';
 import { app, BrowserWindow, ipcMain, protocol, session, shell } from 'electron';
 import fs from 'fs';
 import net, { AddressInfo } from 'net';
 import path from 'path';
+import { logger } from './logger';
+import { createHandler } from './next-electron';
 
 let nextProcess: ChildProcess | undefined;
 let serverPort: number | undefined;
 let mainWindow: BrowserWindow | null = null;
 
 process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
-process.env['ELECTRON_ENABLE_LOGGING'] = 'true';
+process.env['ELECTRON_ENABLE_LOGGING'] = 'false';
 
 process.on('SIGTERM', () => process.exit(0));
 process.on('SIGINT', () => process.exit(0));
+process.on('warning', (w) => {
+  if (w.name === 'ExtensionLoadWarning') return;
+  console.warn(w);
+});
 
 const mode = app.isPackaged
   ? 'packaged'
@@ -35,7 +29,25 @@ const mode = app.isPackaged
 const isDev = mode === 'development' && !app.isPackaged;
 
 const enableHttps = true; // Set to true to enable HTTPS
+const enableDebugger = false; //isDev;
 
+app.commandLine.appendSwitch('enable-logging');
+if (enableDebugger) {
+  logger('MAIN', 'success', 'Debugger is enabled', 'info');
+} else {
+  logger('MAIN', 'disabled', 'Debugger is disabled', 'info');
+  app.commandLine.appendSwitch('v', '-1');
+  app.commandLine.appendSwitch('silent');
+  app.commandLine.appendSwitch('disable-logging');
+  app.commandLine.appendSwitch('no-warnings');
+  const origEmitWarning = process.emitWarning;
+  process.emitWarning = function (warning, ...args) {
+    if (typeof warning === 'string' && warning.startsWith('Warning')) {
+      return;
+    }
+    return origEmitWarning.call(process, warning);
+  };
+}
 const appPath = app.getAppPath();
 
 if (app.isPackaged)
@@ -44,29 +56,46 @@ if (app.isPackaged)
       console.error('Error reading directory:', err);
       return;
     }
-    console.log('Directory contents:', files); // 'files' is an array of filenames and directory names
+    if (enableDebugger) console.log('Directory contents:', files); // 'files' is an array of filenames and directory names
   });
 
 let watcher: fs.FSWatcher | null = null;
 
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'http',
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-    },
-  },
-  {
-    scheme: 'https',
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-    },
-  },
-]);
+enableHttps
+  ? protocol.registerSchemesAsPrivileged([
+      {
+        scheme: 'https',
+        privileges: {
+          standard: true,
+          secure: true,
+          supportFetchAPI: true,
+          bypassCSP: true,
+          stream: true,
+        },
+      },
+      {
+        scheme: 'http',
+        privileges: {
+          standard: true,
+          secure: true,
+          supportFetchAPI: true,
+          bypassCSP: true,
+          stream: true,
+        },
+      },
+    ])
+  : protocol.registerSchemesAsPrivileged([
+      {
+        scheme: 'http',
+        privileges: {
+          standard: true,
+          secure: true,
+          supportFetchAPI: true,
+          bypassCSP: true,
+          stream: true,
+        },
+      },
+    ]);
 
 let stopIntercept: (() => void) | null = null;
 
@@ -107,13 +136,17 @@ async function createWindow() {
     },
   });
 
-  const { createHandler } = await import('./next-electron.js');
+  // const { createHandler } = await import('./next-electron.js');
   if (isDev) {
-    watcher = fs.watch(path.join(appPath, 'src'), { recursive: true });
-    watcher.on('change', (eventType, filename) => {
-      console.log(`File changed: src/${filename}, event type: ${eventType}`);
-      mainWindow?.reload();
-    });
+    chokidar
+      .watch(path.join(appPath, 'src'), { ignored: /database/, persistent: true })
+      .on('change', (filePath) => {
+        console.log(`\x1b[33m[WATCHER] File changed: ${filePath}\x1b[0m`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.reload();
+        }
+      });
+
     try {
       // 2. Find an available port
       serverPort = await getAvailablePort();
@@ -122,7 +155,7 @@ async function createWindow() {
         dev: isDev,
         dir: path.resolve(appPath),
         protocol,
-        debug: false,
+        debug: enableDebugger,
         port: serverPort,
         turbopack: true, // optional
         mode,
@@ -132,7 +165,7 @@ async function createWindow() {
       stopIntercept = await createInterceptor({
         session: mainWindow.webContents.session,
       });
-      console.log(`Starting Next.js server internally on: ${url}`);
+      logger('MAIN', 'default', `Starting Next.js server internally on: ${url}`, 'info');
 
       // 3. Set the PORT environment variable for the script to use
       process.env.PORT = serverPort?.toString() ?? '0';
@@ -141,11 +174,11 @@ async function createWindow() {
       await app.whenReady();
       // await checkServerStatus(url);
 
-      await mainWindow.loadURL(url + '/');
+      await mainWindow.loadURL(url);
 
-      console.log(`\x1b[36m[MAIN] Loaded app://::1:${serverPort?.toString() ?? 0}\x1b[0m`);
+      logger('MAIN', 'default', `Loaded ${url}`, 'info');
     } catch (e) {
-      console.error('Failed to run Next.js Development Server:', e);
+      logger('ERROR', 'error', 'Failed to run Next.js Development Server:', 'error');
       app.quit();
       return;
     }
@@ -158,7 +191,7 @@ async function createWindow() {
         dev: isDev,
         dir: path.resolve(appPath),
         protocol,
-        debug: true,
+        debug: enableDebugger,
         port: serverPort,
         turbopack: true, // optional
         mode,
@@ -168,7 +201,7 @@ async function createWindow() {
       stopIntercept = await createInterceptor({
         session: mainWindow.webContents.session,
       });
-      console.log(`Starting Next.js server internally on: ${url}`);
+      logger('MAIN', 'info', `Starting Next.js server internally on: ${url}`, 'info');
 
       // 3. Set the PORT environment variable for the script to use
       process.env.PORT = serverPort?.toString() ?? '0';
@@ -177,11 +210,11 @@ async function createWindow() {
       await app.whenReady();
       // await checkServerStatus(url);
 
-      await mainWindow.loadURL(url + '/');
+      await mainWindow.loadURL(url);
 
-      console.log('[APP] Loaded', url);
+      logger('MAIN', 'info', `Loaded URL: ${url}`, 'info');
     } catch (e) {
-      console.error('Failed to run Next.js Development Server:', e);
+      logger('ERROR', 'error', 'Failed to run Next.js Development Server:', 'error');
       app.quit();
       return;
     }
@@ -196,10 +229,10 @@ async function createWindow() {
 
 // Prepare the app
 app.whenReady().then(async () => {
-  console.log('\x1b[36m[MAIN] Application ready!\x1b[0m');
+  logger('MAIN', 'info', 'Application ready!', 'info');
 
   if (enableHttps) {
-    console.log('\x1b[32m[MAIN] HTTPS is enabled\x1b[0m');
+    logger('MAIN', 'info', 'HTTPS is enabled', 'info');
     const certDir = path.join(appPath, 'certificates');
     const keyPath = path.join(certDir, 'localhost-key.pem');
     const certPath = path.join(certDir, 'localhost.pem');
@@ -209,17 +242,25 @@ app.whenReady().then(async () => {
     }
 
     if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
-      console.log('Certificates not found. Generating self-signed certificates...');
+      logger(
+        'MAIN',
+        'active',
+        'Certificates not found. Generating self-signed certificates...',
+        'info'
+      );
       try {
         // Requires mkcert to be installed on the system
         execSync(`mkcert -install`, { stdio: 'inherit' });
         execSync(`mkcert -key-file ${keyPath} -cert-file ${certPath} localhost 127.0.0.1 ::1`, {
           stdio: 'inherit',
         });
-        console.log('Certificates generated successfully.');
+        logger('MAIN', 'success', 'Certificates generated successfully.', 'info');
       } catch (error) {
-        console.error(
-          'Failed to generate certificates. Ensure mkcert is installed and in your PATH.'
+        logger(
+          'ERROR',
+          'error',
+          'Failed to generate certificates. Ensure mkcert is installed and in your PATH.',
+          'error'
         );
         process.exit(1);
       }
@@ -232,20 +273,20 @@ app.whenReady().then(async () => {
     app.commandLine.appendSwitch('cert-cert', fs.readFileSync(certPath).toString());
     app.commandLine.appendSwitch('enable-https');
 
-    console.log('\x1b[32m[MAIN] SSL Certificates setup completed\x1b[0m');
+    logger('MAIN', 'success', 'SSL Certificates setup completed', 'info');
   }
 
-  console.log('\x1b[33m[MAIN] Registering IPC handlers...\x1b[0m');
+  logger('MAIN', 'active', 'Registering IPC handlers...', 'info');
 
   // 1. Handler for Ping
   ipcMain.handle('ping', () => {
-    console.log('\x1b[36m[IPC] Ping received and responding with "pong".\x1b[0m');
+    logger('IPC', 'info', 'Ping received and responding with "pong".', 'info');
     return 'pong';
   });
 
   // 2. Handler for getAppInfo (CRITICAL FIX for system info)
   ipcMain.handle('get-app-info', () => {
-    console.log('\x1b[36m[IPC] Handling get-app-info request.\x1b[0m');
+    logger('IPC', 'info', 'Handling get-app-info request.', 'info');
     return {
       nodeVersion: process.version,
       electronVersion: process.versions.electron,
@@ -255,14 +296,14 @@ app.whenReady().then(async () => {
 
   // 3. Handler for beep (CRITICAL FIX for beep sound)
   ipcMain.handle('beep-sound', () => {
-    console.log('\x1b[36m[IPC] Triggering system beep.\x1b[0m');
+    logger('IPC', 'info', 'Handling beep-sound request.', 'info');
     shell.beep(); // Use the Electron shell API
     // No return value (void) but the promise resolves successfully
   });
 
-  console.log('\x1b[32m[MAIN] IPC handlers registered\x1b[0m');
-  if (isDev) {
-    console.log('\x1b[33m[MAIN] Installing DevTools extensions...\x1b[0m');
+  logger('MAIN', 'success', 'IPC handlers registered successfully.', 'info');
+  if (isDev && !app.isPackaged) {
+    logger('MAIN', 'active', 'Installing DevTools extensions...', 'info');
     const extensions = [
       {
         id: 'REACT_DEVELOPER_TOOLS',
@@ -280,9 +321,9 @@ app.whenReady().then(async () => {
         await session.defaultSession.extensions.loadExtension(pack.path, {
           allowFileAccess: true,
         });
-        console.log(`\x1b[32m[MAIN] Installed Extension: ${pack.name}\x1b[0m`);
+        logger('MAIN', 'success', `Installed Extension: ${pack.name}`, 'info');
       } catch (err) {
-        console.error(`\x1b[31m[MAIN] Failed to install extension: ${pack.name}\x1b[0m`, err);
+        logger('ERROR', 'error', `Failed to install extension: ${pack.name}`, 'error');
       }
     }
   }

@@ -32,6 +32,10 @@ export function proxy(req: NextRequest) {
   const pathname = url.pathname; // incoming path (already decoded)
   const searchParams = url.searchParams;
 
+  const secure = req.headers.get('x-enabled-https') === '1';
+  if (secure) {
+  }
+
   // Quick exit: if nothing matches, no op
   if (!matchesPath(pathname)) return NextResponse.next();
 
@@ -41,10 +45,12 @@ export function proxy(req: NextRequest) {
       const callback = encodeURIComponent(pathname + '?' + searchParams.toString());
       const loginPathname = '/auth/login';
       const loginParams = new URLSearchParams({ callback });
+
       return NextResponse.redirect(
         new URL(
           `${loginPathname}?${loginParams.toString()}`,
-          process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
+          process.env.NEXT_PUBLIC_BASE_URL ??
+            `${secure ? 'https' : 'http'}://localhost:${req.nextUrl.port}`
         ),
         307
       );

@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 import { type Protocol, type Session } from 'electron';
-// import next from "next";
 
 import { NextConfig } from 'next';
 import createNextServer, {
@@ -11,7 +10,11 @@ import createNextServer, {
 } from 'next/dist/server/next';
 import assert from 'node:assert';
 import fs from 'node:fs';
-import { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:http';
+import { createServer, IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:http';
+import {
+  createServer as createSecureServer,
+  type ServerOptions as SecureServerOptions,
+} from 'node:https';
 import { Socket } from 'node:net';
 import path from 'node:path';
 import { parse } from 'node:url';
@@ -77,8 +80,10 @@ export async function createHandler({
       dev: dev,
       dir: dir,
       hostname: hostname,
+      protocol: protocol,
       port: port,
       debug: debug,
+      httpsEnabled: https,
     });
   }
 
@@ -97,6 +102,8 @@ export async function createHandler({
   let nextApp: NextServer | null = null;
   let handler: RequestHandler | null = null;
 
+  let secureOptions: SecureServerOptions<typeof IncomingMessage, typeof ServerResponse> = {};
+
   if (dev) {
     nextApp = createNextServer({
       ...serverOptions,
@@ -109,7 +116,6 @@ export async function createHandler({
           removeConsole: true,
         },
       },
-      experimentalHttpsServer: https,
     }) as NextServer;
     handler = nextApp?.getRequestHandler();
   } else {
@@ -124,22 +130,53 @@ export async function createHandler({
       ...nextOptions?.conf,
     });
 
-    nextApp = next({ ...serverOptions, experimentalHttpsServer: https }) as NextServer;
+    nextApp = next({ ...serverOptions }) as NextServer;
     handler = nextApp?.getRequestHandler();
   }
 
   if (!nextApp) {
     throw new Error('Failed to create Next.js server');
   }
+  if (https) {
+    const certDir = path.join(dir, 'certificates');
+    const keyPath = path.join(certDir, 'localhost-key.pem');
+    const certPath = path.join(certDir, 'localhost.pem');
 
-  preparePromise = nextApp?.prepare().catch((err: Error) => {
-    console.error('Cannot prepare Next.js server', err.stack);
-    throw err;
-  });
+    if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+      throw new Error('SSL files missing!');
+    }
+
+    const key = fs.readFileSync(path.join(process.cwd(), 'certificates', 'localhost-key.pem'));
+    const cert = fs.readFileSync(path.join(process.cwd(), 'certificates', 'localhost.pem'));
+
+    secureOptions = {
+      key,
+      cert,
+    };
+  }
+  preparePromise = nextApp
+    ?.prepare()
+    .then(() => {
+      https
+        ? createSecureServer(secureOptions, (req, res) => {
+            assert(handler, 'Next.js handler is not initialized');
+            return handler(req, res);
+          }).listen(port, hostname)
+        : createServer((req, res) => {
+            assert(handler, 'Next.js handler is not initialized');
+            return handler(req, res);
+          }).listen(port, hostname);
+      if (debug) console.log(`[NEXT] Server ready on ${localhostUrl}`);
+    })
+    .catch((err: Error) => {
+      console.error('Cannot prepare Next.js server', err.stack);
+      throw err;
+    });
 
   async function createInterceptor({ session }: { session: Session }) {
     assert(session, 'Session is required');
     assert(fs.existsSync(dir ?? 'unknown'), 'dir does not exist');
+    if (debug) console.log({ session });
 
     if (debug)
       console.log(`Server Intercept Enabled, ${localhostUrl} will be intercepted by ${dir}`);
@@ -153,69 +190,73 @@ export async function createHandler({
 
     await preparePromise;
 
+    https &&
+      protocol.handle('https', async (request) => {
+        if (debug) console.log(`[NEXT] HTTPS Request: ${request.url}`);
+        try {
+          assert(request.url.startsWith(localhostUrl), 'HTTPS not supported');
+          assert(handler, 'Next.js handler is not initialized');
+
+          const req = await createRequest({ socket, request, session });
+          const res = new ReadableServerResponse(req);
+          const url = parse(req.url ?? '/', true);
+
+          handler(req, res, url); // Next.js request handler
+
+          const response = await res.getResponse();
+
+          try {
+            const cookies = parseCookie(
+              response.headers.getSetCookie().reduce((r, c) => {
+                // @see https://github.com/nfriedly/set-cookie-parser?tab=readme-ov-file#usage-in-react-native-and-with-some-other-fetch-implementations
+                return [...r, ...splitCookiesString(c)];
+              }, [] as string[])
+            );
+
+            for (const cookie of cookies) {
+              const { name, value, path, domain, secure, httpOnly, expires, maxAge } = cookie;
+
+              const expirationDate = expires
+                ? expires.getTime()
+                : maxAge
+                  ? Date.now() + maxAge * 1000
+                  : undefined;
+
+              if (expirationDate && expirationDate < Date.now()) {
+                await session.cookies.remove(request.url, cookie.name);
+                continue;
+              }
+
+              await session.cookies.set({
+                url: request.url,
+                expirationDate,
+                name,
+                value,
+                path,
+                domain,
+                secure,
+                httpOnly,
+                maxAge,
+              } as any);
+            }
+          } catch (e) {
+            throw new Error('Failed to set cookies', { cause: e });
+          }
+
+          if (debug) console.log('[NEXT] Handler', request.url, response.status);
+          return response;
+        } catch (e: unknown) {
+          const err = e as Error;
+          if (debug) console.log('[NEXT] Error', err);
+          return new Response(err.message, { status: 500 });
+        }
+      });
+
     protocol.handle('http', async (request) => {
       try {
+        if (debug) console.log(`[NEXT] HTTP Request: ${request.url}`);
+        if (debug) console.log(`[NEXT] HTTP Supported: ${request.url.startsWith(localhostUrl)}`);
         assert(request.url.startsWith(localhostUrl), 'HTTP not supported, use HTTPS');
-        assert(handler, 'Next.js handler is not initialized');
-
-        const req = await createRequest({ socket, request, session });
-        const res = new ReadableServerResponse(req);
-        const url = parse(req.url ?? '/', true);
-
-        handler(req, res, url); // Next.js request handler
-
-        const response = await res.getResponse();
-
-        try {
-          const cookies = parseCookie(
-            response.headers.getSetCookie().reduce((r, c) => {
-              // @see https://github.com/nfriedly/set-cookie-parser?tab=readme-ov-file#usage-in-react-native-and-with-some-other-fetch-implementations
-              return [...r, ...splitCookiesString(c)];
-            }, [] as string[])
-          );
-
-          for (const cookie of cookies) {
-            const { name, value, path, domain, secure, httpOnly, expires, maxAge } = cookie;
-
-            const expirationDate = expires
-              ? expires.getTime()
-              : maxAge
-                ? Date.now() + maxAge * 1000
-                : undefined;
-
-            if (expirationDate && expirationDate < Date.now()) {
-              await session.cookies.remove(request.url, cookie.name);
-              continue;
-            }
-
-            await session.cookies.set({
-              url: request.url,
-              expirationDate,
-              name,
-              value,
-              path,
-              domain,
-              secure,
-              httpOnly,
-              maxAge,
-            } as any);
-          }
-        } catch (e) {
-          throw new Error('Failed to set cookies', { cause: e });
-        }
-
-        if (debug) console.log('[NEXT] Handler', request.url, response.status);
-        return response;
-      } catch (e: unknown) {
-        const err = e as Error;
-        if (debug) console.log('[NEXT] Error', err);
-        return new Response(err.message, { status: 500 });
-      }
-    });
-
-    protocol.handle('https', async (request) => {
-      try {
-        assert(request.url.startsWith(localhostUrl), 'HTTPS not supported');
         assert(handler, 'Next.js handler is not initialized');
 
         const req = await createRequest({ socket, request, session });
@@ -275,7 +316,7 @@ export async function createHandler({
 
     return function stopIntercept() {
       protocol.unhandle('http');
-      protocol.unhandle('https');
+      https && protocol.unhandle('https');
       process.off('SIGTERM', closeSocket);
       process.off('SIGINT', closeSocket);
       closeSocket();
@@ -297,6 +338,7 @@ export async function createRequest({
   const req = new IncomingMessage(socket);
 
   const url = new URL(request.url);
+  // console.log(`[REQUEST] ${request.method} ${url.href}`);
 
   // Normal Next.js URL does not contain schema and host/port, otherwise endless loops due to butchering of schema by normalizeRepeatedSlashes in resolve-routes
   req.url = url.pathname + (url.search || '');
@@ -305,6 +347,8 @@ export async function createRequest({
   request.headers.forEach((value, key) => {
     req.headers[key] = value;
   });
+  req.headers['x-enabled-https'] = url.protocol === 'https:' ? '1' : '0';
+  // console.log('[REQUEST] Headers:', req.headers);
 
   try {
     const cookies = await session.cookies.get({
