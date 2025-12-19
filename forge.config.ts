@@ -5,6 +5,10 @@ import fs from 'fs-extra';
 import path from 'path';
 
 import { execSync } from 'child_process';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/pglite';
+import { UpdateAccount, User } from './lib/db/schema/auth.schema';
+import { hashPassword } from './lib/utils/password';
 import packageJson from './package.json';
 import { maybeFetchContributors } from './tools/contributors';
 import { populateReleases } from './tools/fetch-releases';
@@ -113,6 +117,102 @@ const config: ForgeConfig = {
               process.exit(1);
             }
           }
+
+          const dbPath = path.join(buildPath, 'database');
+
+          const dbConfigSrc = path.join(__dirname, 'drizzle.config.electron.ts');
+          const dbConfigDest = path.join(buildPath, 'drizzle.config.ts');
+          await fs.copy(dbConfigSrc, dbConfigDest);
+          console.log('✅ Copied Drizzle config to Electron resources');
+          const dbSchemaSrc = path.join(__dirname, 'src', 'lib', 'db', 'schema');
+          const dbSchemaDest = path.join(buildPath, 'lib', 'db', 'schema');
+          await fs.copy(dbSchemaSrc, dbSchemaDest);
+          console.log('✅ Copied Drizzle schema to Electron resources');
+
+          try {
+            execSync(`npx drizzle-kit generate --config=./drizzle.config.ts`, { cwd: buildPath });
+          } catch (e) {
+            console.log('Migration generation failed, continuing anyway...');
+          }
+
+          try {
+            execSync(`npx drizzle-kit migrate --config=./drizzle.config.ts`, { cwd: buildPath });
+          } catch (e) {
+            console.log('Migration failed, continuing anyway...');
+          }
+
+          const db = drizzle(`${dbPath}`);
+          const SEED_USERS: Array<{
+            user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>;
+            account: UpdateAccount;
+          }> = [
+            {
+              user: {
+                name: 'Testing User',
+                email: 'testing.user@gmail.com',
+                emailVerified: true,
+                image: 'https://github.com/shadcn.png',
+                username: 'tuser',
+                displayUsername: 'tuser',
+                role: 'superadmin',
+                banned: null,
+                banExpires: null,
+                banReason: null,
+                twoFactorEnabled: false,
+              },
+              account: { password: 'Password123!', providerId: 'user' },
+            },
+          ];
+
+          const { user, account } = await import(
+            path.join(buildPath, 'lib', 'db', 'schema', 'auth.schema.js')
+          );
+
+          async function createUsers() {
+            for await (const seed of SEED_USERS) {
+              const hashedPassword = await hashPassword(
+                seed.account.password ?? 'SuperSecretPassword'
+              );
+              const existingUser = await db
+                .select()
+                .from(user)
+                .where(eq(user.email, seed.user.email))
+                .limit(1);
+              if (existingUser.length > 0) {
+                console.log(`User with email ${seed.user.email} already exists. Skipping...`);
+                continue;
+              }
+              const [result] = await db
+                .insert(user)
+                .values(seed.user)
+                .onConflictDoUpdate({
+                  target: user.email,
+                  set: { ...seed.user },
+                })
+                .returning({ userId: user.id });
+
+              const { userId } = result;
+              const existingAccountRow = (
+                await db.select().from(account).where(eq(account.userId, userId)).limit(1)
+              )[0];
+              const existingAccountId = existingAccountRow?.id;
+              await db
+                .insert(account)
+                .values({
+                  providerId: seed.account.providerId ?? 'user',
+                  userId,
+                  password: hashedPassword,
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                })
+                .onConflictDoUpdate({
+                  target: account.id,
+                  set: { ...seed.account, id: existingAccountId },
+                });
+            }
+          }
+          await createUsers();
+          console.log('✅ Seeded users into the database');
 
           callback();
         } catch (error) {

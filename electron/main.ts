@@ -1,5 +1,5 @@
 import { ChildProcess, execSync } from 'child_process';
-
+import { sql } from 'drizzle-orm';
 import { app, BrowserWindow, ipcMain, protocol, session, shell } from 'electron';
 import fs from 'fs';
 import net, { AddressInfo } from 'net';
@@ -230,15 +230,21 @@ async function createWindow() {
 
 // Prepare the app
 app.whenReady().then(async () => {
-  logger('MAIN', 'active', 'Initializing database...', 'info');
+  logger('MAIN', 'active', 'Initializing application...', 'info');
+  const drizzlePath = app.isPackaged
+    ? path.join(appPath, 'lib', 'db', 'drizzle.js')
+    : path.join(appPath, 'src', 'lib', 'db', 'drizzle.js');
+  logger('MAIN', 'info', `Using Drizzle path: ${drizzlePath}`, 'info');
   try {
-    const { seedUsers } = await import(
-      'file://' + path.join(appPath, './services/seeding/users.js')
-    );
-    await seedUsers();
-    logger('MAIN', 'success', 'Database initialized and running.', 'info');
-  } catch (e) {
-    logger('ERROR', 'error', `Failed to seed users: ${e}`, 'error');
+    const { db } = await import('file://' + drizzlePath);
+    // Execute a simple SQL query
+    await db.execute(sql`SELECT 1`);
+
+    logger('MAIN', 'success', 'Database connection established successfully.', 'info');
+  } catch (err: unknown) {
+    const error = err as Error;
+    console.error('Database connection failed:', error);
+    logger('MAIN', 'error', `Test query failed: ${error.message}`, 'error');
   }
 
   logger('MAIN', 'info', 'Application ready!', 'info');
