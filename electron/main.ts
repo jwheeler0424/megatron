@@ -1,5 +1,5 @@
 import { ChildProcess, execSync } from 'child_process';
-import chokidar from 'chokidar';
+
 import { app, BrowserWindow, ipcMain, protocol, session, shell } from 'electron';
 import fs from 'fs';
 import net, { AddressInfo } from 'net';
@@ -29,7 +29,7 @@ const mode = app.isPackaged
 const isDev = mode === 'development' && !app.isPackaged;
 
 const enableHttps = true; // Set to true to enable HTTPS
-const enableDebugger = false; //isDev;
+const enableDebugger = true; //isDev;
 
 app.commandLine.appendSwitch('enable-logging');
 if (enableDebugger) {
@@ -138,6 +138,7 @@ async function createWindow() {
 
   // const { createHandler } = await import('./next-electron.js');
   if (isDev) {
+    const chokidar = await import('chokidar');
     chokidar
       .watch(path.join(appPath, 'src'), { ignored: /database/, persistent: true })
       .on('change', (filePath) => {
@@ -229,6 +230,17 @@ async function createWindow() {
 
 // Prepare the app
 app.whenReady().then(async () => {
+  logger('MAIN', 'active', 'Initializing database...', 'info');
+  try {
+    const { seedUsers } = await import(
+      'file://' + path.join(appPath, './services/seeding/users.js')
+    );
+    await seedUsers();
+    logger('MAIN', 'success', 'Database initialized and running.', 'info');
+  } catch (e) {
+    logger('ERROR', 'error', `Failed to seed users: ${e}`, 'error');
+  }
+
   logger('MAIN', 'info', 'Application ready!', 'info');
 
   if (enableHttps) {

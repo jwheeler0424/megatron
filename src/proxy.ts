@@ -33,8 +33,6 @@ export function proxy(req: NextRequest) {
   const searchParams = url.searchParams;
 
   const secure = req.headers.get('x-enabled-https') === '1';
-  if (secure) {
-  }
 
   // Quick exit: if nothing matches, no op
   if (!matchesPath(pathname)) return NextResponse.next();
@@ -67,29 +65,9 @@ export function proxy(req: NextRequest) {
     }
   }
 
-  let destination = '/'; // fallback destination
-  const action = searchParams.get('action');
-  if (pathname.includes('/quick-export')) {
-    if (action === 'cancel') {
-      const originRoute = searchParams.get('origin');
-      destination = originRoute && !originRoute?.includes('/quick-export') ? originRoute : '/';
-      const route = new URL(destination, req.url);
-      return NextResponse.redirect(route, 307);
-    }
-    if (!pathname.includes('/start') && !searchParams.has('action')) {
-      destination = '/quick-export/start';
-      const route = new URL(destination, req.url);
-      return NextResponse.redirect(route, 307);
-    }
-  }
-  if (pathname.includes('/users')) {
-    if (action === 'cancel') {
-      const originRoute = searchParams.get('origin');
-      destination = originRoute && !originRoute?.includes('/users') ? originRoute : '/users';
-      const route = new URL(destination, req.url);
-      return NextResponse.redirect(route, 307);
-    }
-  }
-
   return NextResponse.next();
 }
+
+export const config = {
+  matcher: '/((?!api|_next/data|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)',
+};

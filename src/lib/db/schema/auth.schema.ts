@@ -22,6 +22,10 @@ export const user = table('user', {
   displayUsername: text('display_username'),
 });
 
+export type User = typeof user.$inferSelect;
+export type NewUser = typeof user.$inferInsert;
+export type UpdateUser = Partial<NewUser>;
+
 export const account = table('account', {
   id: idPrimaryKey,
   accountId: uuid('account_id')
@@ -42,6 +46,10 @@ export const account = table('account', {
   updatedAt: timestamp('updated_at').notNull(),
 });
 
+export type Account = typeof account.$inferSelect;
+export type NewAccount = typeof account.$inferInsert;
+export type UpdateAccount = Partial<NewAccount>;
+
 export const verification = table('verification', {
   id: idPrimaryKey,
   identifier: text('identifier').notNull(),
@@ -51,6 +59,10 @@ export const verification = table('verification', {
   updatedAt: timestamp('updated_at').$defaultFn(() => /* @__PURE__ */ new Date()),
 });
 
+export type Verification = typeof verification.$inferSelect;
+export type NewVerification = typeof verification.$inferInsert;
+export type UpdateVerification = Partial<NewVerification>;
+
 export const twoFactor = table('two_factor', {
   id: idPrimaryKey,
   secret: text('secret').notNull(),
@@ -59,3 +71,7 @@ export const twoFactor = table('two_factor', {
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
 });
+
+export type TwoFactor = typeof twoFactor.$inferSelect;
+export type NewTwoFactor = typeof twoFactor.$inferInsert;
+export type UpdateTwoFactor = Partial<NewTwoFactor>;

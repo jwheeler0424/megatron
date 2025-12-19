@@ -4,6 +4,7 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import fs from 'fs-extra';
 import path from 'path';
 
+import { execSync } from 'child_process';
 import packageJson from './package.json';
 import { maybeFetchContributors } from './tools/contributors';
 import { populateReleases } from './tools/fetch-releases';
@@ -87,6 +88,31 @@ const config: ForgeConfig = {
           const nextElectronDest = path.join(buildPath, 'build', 'next-electron.js');
           await fs.copy(nextElectronSrc, nextElectronDest);
           console.log('✅ Copied next-electron.js to Electron resources');
+
+          const certDir = path.join(buildPath, 'certificates');
+          const keyPath = path.join(certDir, 'localhost-key.pem');
+          const certPath = path.join(certDir, 'localhost.pem');
+
+          if (!fs.existsSync(certDir)) {
+            fs.mkdirSync(certDir);
+          }
+
+          if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+            try {
+              // Requires mkcert to be installed on the system
+              execSync(`mkcert -install`, { stdio: 'inherit' });
+              execSync(
+                `mkcert -key-file ${keyPath} -cert-file ${certPath} localhost 127.0.0.1 ::1`,
+                {
+                  stdio: 'inherit',
+                }
+              );
+              console.log('✅ Generated self-signed certificates for localhost');
+            } catch (error) {
+              console.error('❌ Error generating certificates:', error);
+              process.exit(1);
+            }
+          }
 
           callback();
         } catch (error) {

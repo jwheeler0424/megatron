@@ -146,8 +146,8 @@ export async function createHandler({
       throw new Error('SSL files missing!');
     }
 
-    const key = fs.readFileSync(path.join(process.cwd(), 'certificates', 'localhost-key.pem'));
-    const cert = fs.readFileSync(path.join(process.cwd(), 'certificates', 'localhost.pem'));
+    const key = fs.readFileSync(path.join(dir, 'certificates', 'localhost-key.pem'));
+    const cert = fs.readFileSync(path.join(dir, 'certificates', 'localhost.pem'));
 
     secureOptions = {
       key,
